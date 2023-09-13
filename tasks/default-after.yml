@@ -1,0 +1,29 @@
+    - name: Make a package mirror / local cache of source code for all versions of key packages and their dependencies.
+      ansible.builtin.shell:
+        cmd: "{{ spack_install_dir | quote }}/bin/spack mirror create -D -d {{ spack_mirror_dir | quote }} -n all {{ item | quote }}"
+        executable: /bin/bash
+      with_items: "{{ spack_mirror_pkgs }}"
+      async: '{{spack_timeout_seconds}}'
+      poll: 120
+      when: "{{ spack_mirror_pkgs|default(false, true) }}"
+    
+    - name: Add a local package mirror as a globally available mirror on this host.
+      ansible.builtin.shell:
+        cmd: "{{ spack_install_dir | quote }}/bin/spack mirror add local file://{{ spack_mirror_dir | quote }} --scope defaults"
+        executable: /bin/bash
+      when: "{{ spack_mirror_pkgs|default(false, true) }}"
+    
+    # This takes a long time because compiling compilers takes a long time.
+    # Because of this we have it run asynchronously.
+    # Anecdotal reference:
+    # https://unix.stackexchange.com/questions/421822/how-long-does-it-take-to-compile-gcc-7-3-0
+    - name: Install base environment packages.
+      when: "{{ spack_base_env|default(false, true) }}"
+      ansible.builtin.shell:
+        cmd: "{{ spack_install_dir | quote }}/bin/spack install {{ item | quote }}"
+        executable: /bin/bash
+      with_items: "{{ spack_base_env }}"
+      async: '{{spack_timeout_seconds}}'
+      poll: 120
+      when: "{{ spack_base_env|default(false, true) }}"
+
