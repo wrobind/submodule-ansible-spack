@@ -70,6 +70,8 @@
       poll: 5
 
     - name: Change ownership of install directory to service account
+      become: yes
+      become_user: root
       file:
         path: '{{ spack_install_dir }}'
         owner: '{{ spack_service_user }}'
@@ -79,6 +81,8 @@
         follow: no
 
     - name: Ensure that install directory is world readable.
+      become: yes
+      become_user: root
       file:
         path: '{{ spack_install_dir }}'
         state: directory
