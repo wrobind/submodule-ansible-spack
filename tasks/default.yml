@@ -98,7 +98,7 @@
       template:
         src: sudoers-spack.j2
         dest: "{{ sudoers_dest }}"
-        validate: visudo --check -f "{{ sudoers_dest }}"
+        validate: /usr/sbin/visudo -cf %s
 
     - name: Add Spack to universal bash profile.
       when: spack_make_sys_default and not spack_binary.stat.exists
