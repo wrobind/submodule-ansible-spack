@@ -113,6 +113,7 @@
         minute: "0"
         user: '{{ spack_service_user }}'
         job: "{{ spack_install_dir | quote }}/bin/spack clean"
+        name: "spack daily cleaning"
   become: yes
   become_user: root
 
