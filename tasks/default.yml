@@ -120,9 +120,8 @@
 - block:
     - name: Initialize Spack environmment
       ansible.builtin.shell:
-        cmd: /etc/profile.d/spack-env.sh
+        cmd: source /etc/profile.d/spack-env.sh
         executable: /bin/bash
-      # command: "/bin/bash /etc/profile.d/spack-env.sh"
       when: not spack_binary.stat.exists
     
     - name: Add a remote package mirror as a globally available mirror on this host.
