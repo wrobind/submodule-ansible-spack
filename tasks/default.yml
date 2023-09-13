@@ -11,67 +11,65 @@
 #
 #THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ---
-- name: Install OS package dependencies
+- block:
+  - name: Install OS package dependencies
+    with_items: '{{ spack_dep_pkgs | default([]) }}'
+    loop_control:
+      loop_var: spack_os_pkg
+    package:
+      state: present
+      name: '{{ spack_os_pkg }}'
+  
+  - name: Create a Spack service user group with a specific guid.
+    group:
+      name: '{{ spack_service_group }}'
+      gid: '{{ spack_service_group_gid }}'
+    when: "{{ spack_service_group_gid|default(false, true) }}"
+  
+  - name: Create a Spack service user group with a specific guid.
+    group:
+      name: '{{ spack_service_group }}'
+    when: "not {{ spack_service_group_gid|default(false, true) }}"
+  
+  - name: Create a Spack service user with a specific uid/primary group gid.
+    user: 
+      name: '{{ spack_service_user }}'
+      uid: '{{ spack_service_user_uid }}'
+      group: '{{ spack_service_group }}'
+      home: /var/lib/{{ spack_service_user }}
+      shell: /sbin/nologin
+    when: "{{ spack_service_user_uid |default(false, true) }}"
+    register: make_service_user_result
+  
+  - name: Create a Spack service user.
+    user: 
+      name: '{{ spack_service_user }}'
+      group: '{{ spack_service_group }}'
+      home: /var/lib/{{ spack_service_user }}
+      shell: /sbin/nologin
+    when: make_service_user_result is skipped
+  
+  - name: Check for installation of Spack
+    become: yes
+    stat:
+      path: '{{ spack_install_dir }}/bin/spack'
+    changed_when: false
+    register: spack_binary
   become: yes
   become_user: root
-  with_items: '{{ spack_dep_pkgs | default([]) }}'
-  loop_control:
-    loop_var: spack_os_pkg
-  package:
-    state: present
-    name: '{{ spack_os_pkg }}'
-
-- name: Create a Spack service user group with a specific guid.
-  group:
-    name: '{{ spack_service_group }}'
-    gid: '{{ spack_service_group_gid }}'
-  when: "{{ spack_service_group_gid|default(false, true) }}"
-
-- name: Create a Spack service user group with a specific guid.
-  group:
-    name: '{{ spack_service_group }}'
-  when: "not {{ spack_service_group_gid|default(false, true) }}"
-
-- name: Create a Spack service user with a specific uid/primary group gid.
-  user: 
-    name: '{{ spack_service_user }}'
-    uid: '{{ spack_service_user_uid }}'
-    group: '{{ spack_service_group }}'
-    home: /var/lib/{{ spack_service_user }}
-    shell: /sbin/nologin
-  when: "{{ spack_service_user_uid |default(false, true) }}"
-  register: make_service_user_result
-
-- name: Create a Spack service user.
-  user: 
-    name: '{{ spack_service_user }}'
-    group: '{{ spack_service_group }}'
-    home: /var/lib/{{ spack_service_user }}
-    shell: /sbin/nologin
-  when: make_service_user_result is skipped
-
-- name: Check for installation of Spack
-  become: yes
-  stat:
-    path: '{{ spack_install_dir }}/bin/spack'
-  changed_when: false
-  register: spack_binary
 
 - when: not spack_binary.stat.exists
   block:
     # We don't want to run the risk of accidentally performing a git pull, so the git repo and work tree are separate.  We only pull down the last commit.
     # See here: https://cornell-ssw.github.io/cluster_administration.html#understanding-spack
     # At this point, the best way to upgrade Spack (if desired) is to blow it away and perform a fresh install, perhaps using a lock file for the old environment.
+    #
     - name: Clone spack
-      become: yes
-      become_user: root
       command: "/usr/bin/git --work-tree={{ spack_install_dir }} clone --branch={{ spack_ver }} --depth=1 {{ spack_repo }} {{ spack_install_dir }}/src"
       async: '{{spack_timeout_seconds}}'
       poll: 5
 
     - name: Change ownership of install directory to service account
-      become: yes
-      become_user: root
       file:
         path: '{{ spack_install_dir }}'
         owner: '{{ spack_service_user }}'
@@ -88,79 +86,78 @@
         state: directory
         mode: 0755
 
-- name: Add sudoers rule to make it so that members of the spack service user's group can run spack.
+    - name: Remove modules config if modules are not enabled.
+      file:
+        path: '{{ spack_install_dir }}/etc/spack/defaults/modules.yaml'
+        state: absent
+      when: not spack_modules
+
+    - name: Add sudoers rule to make it so that members of the spack service user's group can run spack.
+      vars:
+        sudoers_dest: /etc/sudoers.d/spack
+      template:
+        src: sudoers-spack.j2
+        dest: "{{ sudoers_dest }}"
+        validate: visudo --check -f "{{ sudoers_dest }}"
+
+    - name: Add Spack to universal bash profile.
+      when: spack_make_sys_default and not spack_binary.stat.exists
+      template:
+        src: spack-env.sh.j2
+        dest: /etc/profile.d/spack-env.sh
+    
+    - name: Add cron job to regularly run "spack clean" in the early morning
+      when: not spack_binary.stat.exists
+      cron:
+        hour: "4"
+        minute: "0"
+        user: '{{ spack_service_user }}'
+        job: "{{ spack_install_dir | quote }}/bin/spack clean"
   become: yes
   become_user: root
-  when: not spack_binary.stat.exists
-  template:
-    src: sudoers-spack.j2
-    dest: /etc/sudoers.d/spack
 
-- name: Add Spack to universal bash profile.
-  become: yes
-  become_user: root
-  when: spack_make_sys_default and not spack_binary.stat.exists
-  template:
-    src: spack-env.sh.j2
-    dest: /etc/profile.d/spack-env.sh
+- block:
+    - name: Initialize Spack environmment
+      ansible.builtin.shell:
+        cmd: /etc/profile.d/spack-env.sh
+        executable: /bin/bash
+      # command: "/bin/bash /etc/profile.d/spack-env.sh"
+      when: not spack_binary.stat.exists
+    
+    - name: Add a remote package mirror as a globally available mirror on this host.
+      ansible.builtin.shell:
+        cmd: "{{ spack_install_dir | quote }}/bin/spack mirror add {{ spack_mirror_remote_name|default('remote', true) | quote }} {{ spack_mirror_remote_addr | quote }} --scope defaults"
+        executable: /bin/bash
+      when: "{{ spack_mirror_remote|default(false, true) }}"
+    
+    - name: Make a package mirror / local cache of source code for all versions of key packages and their dependencies.
+      ansible.builtin.shell:
+        cmd: "{{ spack_install_dir | quote }}/bin/spack mirror create -D -d {{ spack_mirror_dir | quote }} -n all {{ item | quote }}"
+        executable: /bin/bash
+      with_items: "{{ spack_mirror_pkgs }}"
+      async: '{{spack_timeout_seconds}}'
+      poll: 120
+      when: "{{ spack_mirror_pkgs|default(false, true) }}"
+    
+    - name: Add a local package mirror as a globally available mirror on this host.
+      ansible.builtin.shell:
+        cmd: "{{ spack_install_dir | quote }}/bin/spack mirror add local file://{{ spack_mirror_dir | quote }} --scope defaults"
+        executable: /bin/bash
+      when: "{{ spack_mirror_pkgs|default(false, true) }}"
+    
+    # This takes a long time because compiling compilers takes a long time.
+    # Because of this we have it run asynchronously.
+    # Anecdotal reference:
+    # https://unix.stackexchange.com/questions/421822/how-long-does-it-take-to-compile-gcc-7-3-0
+    - name: Install base environment packages.
+      when: "{{ spack_base_env|default(false, true) }}"
+      ansible.builtin.shell:
+        cmd: "{{ spack_install_dir | quote }}/bin/spack install {{ item | quote }}"
+        executable: /bin/bash
+      with_items: "{{ spack_base_env }}"
+      async: '{{spack_timeout_seconds}}'
+      poll: 120
+      when: "{{ spack_base_env|default(false, true) }}"
 
-- name: Initialize Spack environmment
-  become: yes
-  become_user: '{{ spack_service_user }}'
-  when: not spack_binary.stat.exists
-  command: "/bin/bash /etc/profile.d/spack-env.sh"
-
-- name: Remove modules config if modules are not enabled.
-  file:
-    path: '{{ spack_install_dir }}/etc/spack/defaults/modules.yaml'
-    state: absent
-  when: not spack_modules
-
-# If we don't have gcc 8, various Spack commands for installing / mirroring compilers will crap out, since LLVM requires gcc 8 instead
-# of the the CentOS 7 default (4.8.5).  Even for mirroring, Spack seems to concretize for some reason.
-- name: If running a version of RHEL/CentOS before 8, add gcc 8 to compilers.
-  become: yes
-  become_user: '{{ spack_service_user }}'
-  command: /bin/scl enable devtoolset-8 "{{ spack_install_dir }}/bin/spack compiler find --scope defaults"
-  when: ansible_os_family == "RedHat" and ansible_distribution_major_version < '8'
-
-- name: Add cron job to regularly run "spack clean" in the early morning
-  cron:
-    hour: "4"
-    minute: "0"
-    user: '{{ spack_service_user }}'
-    job: "{{ spack_install_dir }}/bin/spack clean"
-
-- name: Add a remote package mirror as a globally available mirror on this host.
-  become: yes
-  become_user: '{{ spack_service_user }}'
-  command: "{{ spack_install_dir }}/bin/spack mirror add {{ spack_mirror_remote_name|default('remote', true) }} {{ spack_mirror_remote_addr }} --scope defaults"
-  when: "{{ spack_mirror_remote|default(false, true) }}"
-
-- name: Make a package mirror / local cache of source code for all versions of key packages and their dependencies.
   become: yes
   become_user: '{{ spack_service_user }}'
-  with_items: "{{ spack_mirror_pkgs }}"
-  when: "{{ spack_mirror_pkgs|default(false, true) }}"
-  command: "{{ spack_install_dir }}/bin/spack mirror create -D -d {{ spack_mirror_dir }} -n all {{ item }}"
-  async: '{{spack_timeout_seconds}}'
-  poll: 120
-
-- name: Add a local package mirror as a globally available mirror on this host.
-  become: yes
-  become_user: '{{ spack_service_user }}'
-  command: "{{ spack_install_dir }}/bin/spack mirror add local file://{{ spack_mirror_dir }} --scope defaults"
-  when: "{{ spack_mirror_pkgs|default(false, true) }}"
-
-# This takes a long time because compiling compilers takes a long time.
-# Because of this we have it run asynchronously.
-# Anecdotal reference:
-# https://unix.stackexchange.com/questions/421822/how-long-does-it-take-to-compile-gcc-7-3-0
-- name: Install base environment packages.
-  become: yes
-  become_user: '{{ spack_service_user }}'
-  with_items: "{{ spack_base_env }}"
-  when: "{{ spack_base_env|default(false, true) }}"
-  command: "{{ spack_install_dir }}/bin/spack install {{ item }}"
-  async: '{{spack_timeout_seconds}}'
-  poll: 120
