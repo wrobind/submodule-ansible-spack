@@ -16,47 +16,49 @@
     with_items: '{{ spack_dep_pkgs | default([]) }}'
     loop_control:
       loop_var: spack_os_pkg
-    package:
+    ansible.builtin.package:
       state: present
       name: '{{ spack_os_pkg }}'
   
   - name: Create a Spack service user group with a specific guid.
-    group:
+    ansible.builtin.group:
       name: '{{ spack_service_group }}'
       gid: '{{ spack_service_group_gid }}'
     when: "{{ spack_service_group_gid|default(false, true) }}"
   
   - name: Create a Spack service user group with a specific guid.
-    group:
+    ansible.builtin.group:
       name: '{{ spack_service_group }}'
     when: "not {{ spack_service_group_gid|default(false, true) }}"
   
   - name: Create a Spack service user with a specific uid/primary group gid.
-    user: 
-      name: '{{ spack_service_user }}'
-      uid: '{{ spack_service_user_uid }}'
-      group: '{{ spack_service_group }}'
+    ansible.builtin.user: 
+      name: '{{ spack_service_user | mandatory }}'
+      uid: '{{ spack_service_user_uid | mandatory }}'
+      group: '{{ spack_service_group | mandatory }}'
       home: /var/lib/{{ spack_service_user }}
-      shell: /sbin/nologin
+      shell: "{{ spack_service_user_shell | default('/sbin/nologin') }}"
+      password: "{{ spack_service_user_password | default('*') }}"
     when: "{{ spack_service_user_uid |default(false, true) }}"
     register: make_service_user_result
   
   - name: Create a Spack service user.
-    user: 
-      name: '{{ spack_service_user }}'
-      group: '{{ spack_service_group }}'
+    ansible.builtin.user: 
+      name: '{{ spack_service_user | mandatory }}'
+      group: '{{ spack_service_group | mandatory }}'
       home: /var/lib/{{ spack_service_user }}
-      shell: /sbin/nologin
+      shell: "{{ spack_service_user_shell | default('/sbin/nologin') }}"
+      password: "{{ spack_service_user_password | default('*') }}"
     when: make_service_user_result is skipped
-  
-  - name: Check for installation of Spack
-    become: yes
-    stat:
-      path: '{{ spack_install_dir }}/bin/spack'
-    changed_when: false
-    register: spack_binary
   become: yes
   become_user: root
+  
+- name: Check for installation of Spack
+  become: yes
+  ansible.builtin.stat:
+    path: '{{ spack_install_dir }}/bin/spack'
+  changed_when: false
+  register: spack_binary
 
 - when: not spack_binary.stat.exists
   block:
