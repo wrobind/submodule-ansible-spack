@@ -14,11 +14,24 @@
 # If we don't have gcc 8, various Spack commands for installing / mirroring compilers will crap out, since LLVM requires gcc 8 instead
 # of the the CentOS 7 default (4.8.5).  Even for mirroring, Spack seems to concretize for some reason.
 
-- name: If running a version of RHEL/CentOS before 8, add gcc 8 to compilers.
+- name: 'If running a version of RHEL/CentOS before 8, add gcc 8 to compilers.'
   become: yes
   become_user: '{{ spack_service_user }}'
-  ansible.builtin.shell: /bin/scl enable devtoolset-8 "{{ spack_install_dir | quote }}/bin/spack compiler find --scope defaults"
-  executable: /bin/bash
+  ignore_errors: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    argv:
+      - source
+      - /etc/profile.d/spack-env.sh
+      - '&&'
+      - /bin/scl
+      - enable
+      - devtoolset-8
+      - "{{ spack_install_dir | quote }}"/bin/spack
+      - compiler
+      - find
+      - --scope
+      - defaults
 
 - name: 'include the default after tasks if we are on a RedHat node'
   ansible.builtin.include_tasks: "{{ role_path }}/tasks/default-after.yml"

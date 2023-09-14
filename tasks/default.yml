@@ -118,19 +118,38 @@
   become_user: root
 
 - block:
-    - name: Initialize Spack environmment
+    - name: 'Initialize Spack environmment and add a remote package mirror as a globally available mirror on this host.'
       ansible.builtin.shell:
-        cmd: source /etc/profile.d/spack-env.sh
         executable: /bin/bash
-      when: not spack_binary.stat.exists
-    
-    - name: Add a remote package mirror as a globally available mirror on this host.
-      ansible.builtin.shell:
-        cmd: "{{ spack_install_dir | quote }}/bin/spack mirror add {{ spack_mirror_remote_name|default('remote', true) | quote }} {{ spack_mirror_remote_addr | quote }} --scope defaults"
+        argv:
+          - source 
+          - /etc/profile.d/spack-env.sh
+          - '&&'
+          - "{{ spack_install_dir | quote }}/bin/spack"
+          - mirror
+          - add
+          - "{{ spack_mirror_remote_name|default('remote', true) | quote }}"
+          - "{{ spack_mirror_remote_addr | quote }}"
+          - --scope
+          - defaults
         executable: /bin/bash
-      when: "{{ spack_mirror_remote|default(false, true) }}"
+      when:
+        - not spack_binary.stat.exists
+        - "{{ spack_mirror_remote|default(false, true) }}"
+
+#    - name: Initialize Spack environmment
+#      ansible.builtin.shell:
+#        cmd: source /etc/profile.d/spack-env.sh
+#        executable: /bin/bash
+#      when: not spack_binary.stat.exists
+#    
+#    - name: Add a remote package mirror as a globally available mirror on this host.
+#      ansible.builtin.shell:
+#        cmd: "{{ spack_install_dir | quote }}/bin/spack mirror add {{ spack_mirror_remote_name|default('remote', true) | quote }} {{ spack_mirror_remote_addr | quote }} --scope defaults"
+#        executable: /bin/bash
+#      when: "{{ spack_mirror_remote|default(false, true) }}"
     
-    - name: resolve platform specific tasks
+    - name: perform platform specific follow-up tasks after installing Spack
       include_tasks: "{{ item }}"
       with_first_found:
         - files:
