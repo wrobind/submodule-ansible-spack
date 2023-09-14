@@ -27,7 +27,7 @@
       - /bin/scl
       - enable
       - devtoolset-8
-      - "{{ spack_install_dir | quote }}"/bin/spack
+      - "{{ spack_install_dir | quote }}/bin/spack"
       - compiler
       - find
       - --scope
